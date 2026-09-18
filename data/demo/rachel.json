@@ -1,0 +1,12 @@
+{
+  "scenario_id": "rachel",
+  "label": "Synthetic deterministic demo; not live travel advice",
+  "date": "2026-09-21",
+  "initial_time": "2026-09-21T07:40:00+08:00",
+  "seed": 42,
+  "origin": "Tampines",
+  "destination": "Raffles Place",
+  "deadline": "08:45",
+  "buffer_minutes": 10,
+  "incident": "Synthetic East-West Line signalling fault"
+}

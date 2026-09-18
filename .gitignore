@@ -1,0 +1,23 @@
+.env
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.db
+*.db-shm
+*.db-wal
+
+node_modules/
+dist/
+playwright-report/
+test-results/
+coverage/
+
+.DS_Store
+Thumbs.db
+
+# The nested ECC toolkit is a local development aid, not part of CommuteSure.
+everything-claude-code/
