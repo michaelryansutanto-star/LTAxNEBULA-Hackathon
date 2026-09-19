@@ -40,6 +40,15 @@ class Route:
         indices=[i for i,s in enumerate(self.segments) if s.origin==location]
         if not indices: raise ValueError(f"location {location} is not a reachable route decision point")
         return replace(self,segments=self.segments[indices[0]:])
+    def remaining_after_elapsed(self,minutes:float)->"Route":
+        """Drop the travel already done, by typical segment durations, so an ETA covers only what is left."""
+        left=max(minutes,0.0); remaining:list[Segment]=[]
+        for segment in self.segments:
+            if remaining or left<segment.mean_minutes:
+                share=1-left/segment.mean_minutes if not remaining and segment.mean_minutes>0 else 1
+                remaining.append(replace(segment,mean_minutes=segment.mean_minutes*share,stddev_minutes=segment.stddev_minutes*share)); left=0
+            else: left-=segment.mean_minutes
+        return replace(self,segments=tuple(remaining))
 
 @dataclass(frozen=True)
 class EvaluationResult:

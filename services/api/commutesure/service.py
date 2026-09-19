@@ -7,7 +7,7 @@ from .alerts import AlertNormalizer
 from .clock import DemoClock
 from .domain import Action,CommutePlan,Journey,Recommendation,Route
 from . import fares
-from .fixtures import INITIAL_TIME,RAIL_ACCESS_MINUTES,fault_payload,rachel_routes,segment_path
+from .fixtures import FAULT_DURATION_MINUTES,FAULT_STARTED_AT,INITIAL_TIME,RAIL_ACCESS_MINUTES,fault_payload,rachel_routes,segment_path
 from .persistence import Repository
 from .policy import PolicyConfig,RecommendationPolicy
 from .simulation import SimulationConfig,Simulator
@@ -89,15 +89,18 @@ class CommuteService:
         journey=self._journey(jid); state=self._state(); now=datetime.fromisoformat(state["clock"]); plan=self.plan(journey["plan_id"])
         from datetime import time
         plan_model=CommutePlan(plan["id"],plan["origin"],plan["destination"],tuple(plan["weekdays"]),time.fromisoformat(plan["deadline"]),plan["buffer_minutes"],plan["timezone"]); target=plan_model.target_arrival(now)
-        models=self._route_models(); selected=journey["selected_route_id"]; current=next(r for r in models if r.id==selected)
+        full=self._route_models(); selected=journey["selected_route_id"]; departed=journey.get("started_at") is not None
+        # Once Rachel is travelling, only the travel still ahead counts and options whose switching point has passed drop out.
+        travelled=(now-datetime.fromisoformat(journey["started_at"])).total_seconds()/60 if departed else 0
+        models=tuple(route.remaining_after_elapsed(travelled) for route in full); current=next(r for r in models if r.id==selected)
+        feasible={r.id for r in models if r.available and (r.id==selected or not departed or r.decision_deadline is None or now<r.decision_deadline)}
         qualities=("Provider observation is stale",) if state["provider_stale"] else ()
-        incident=(26,34) if state["fault_active"] and any("EWL" in s.affected_entities for s in current.segments) else None
-        elapsed=max(0,(now-datetime(2026,9,21,7,48,tzinfo=now.tzinfo)).total_seconds()/60) if incident else 0
-        current_result=self.simulator.evaluate(current,now,target,f"rachel-{state['revision']}-{state['sequence']}",incident_total_minutes=incident,incident_elapsed_minutes=elapsed,quality_reasons=qualities)
-        alternatives=[self.simulator.evaluate(route,now,target,f"rachel-{state['revision']}-{state['sequence']}",quality_reasons=qualities) for route in models if route.id!=selected]
-        rec=self.policy.decide(current_result,alternatives,now,current.decision_deadline,fresh=not state["provider_stale"],feasible_route_ids={r.id for r in models if r.available},selected_route_id=selected if selected!="current-ewl" else None,route_names={r.id:r.name for r in models})
+        incident=FAULT_DURATION_MINUTES if state["fault_active"] else None; elapsed=max(0,(now-FAULT_STARTED_AT).total_seconds()/60) if incident else 0
+        estimate=lambda route:self.simulator.evaluate(route,now,target,f"rachel-{state['revision']}-{state['sequence']}",incident_total_minutes=incident,incident_elapsed_minutes=elapsed,quality_reasons=qualities)
+        current_result=estimate(current); alternatives=[estimate(route) for route in models if route.id!=selected]
+        rec=self.policy.decide(current_result,alternatives,now,current.decision_deadline,fresh=not state["provider_stale"],feasible_route_ids=feasible-{selected},selected_route_id=selected if selected!="current-ewl" else None,route_names={r.id:r.name for r in models})
         sequence=state["sequence"]+1; metrics=[dump(current_result),*[dump(x) for x in alternatives]]
-        evaluation={"id":f"evaluation-{sequence}","sequence":sequence,"target_arrival":target.isoformat(),"routes":metrics,"fares":self._fares(journey,now,models,[current_result,*alternatives]),"model_label":"Estimated arrival times from synthetic segment durations; not calibrated against real commuter outcomes"}
+        evaluation={"id":f"evaluation-{sequence}","sequence":sequence,"target_arrival":target.isoformat(),"routes":metrics,"feasible_route_ids":sorted(feasible),"fares":self._fares(journey,now,tuple(r for r in full if r.id in feasible),[current_result,*alternatives]),"model_label":"Estimated arrival times from synthetic segment durations; not calibrated against real commuter outcomes"}
         self.repo.add_evaluation(jid,sequence,evaluation); self.repo.put("recommendations",{"journey_id":jid},dump(rec),sequence=sequence)
         self._save_state({**state,"sequence":sequence})
         if rec.action is Action.REROUTE:
@@ -109,7 +112,7 @@ class CommuteService:
         departed=journey.get("started_at") is not None; departure=datetime.fromisoformat(journey["started_at"]) if departed else now
         tap_in=departure+timedelta(minutes=RAIL_ACCESS_MINUTES); by_route={result.route_id:result for result in results}
         available=[route for route in models if route.available and route.id in by_route]
-        eta={route.id:max(0.0,(by_route[route.id].eta-now).total_seconds()/60) for route in available}
+        eta={route.id:max(0.0,(by_route[route.id].eta-departure).total_seconds()/60) for route in available}
         on_time=[route.id for route in available if by_route[route.id].late_minutes<=0]
         return {"routes":fares.compare([fares.quote(route,tap_in) for route in available],eta,on_time,self.value_of_time_per_hour),"rail_tap_in":tap_in.isoformat(),"tip":fares.pre_peak_tip(departure,RAIL_ACCESS_MINUTES,departed),
             "value_of_time_per_hour":self.value_of_time_per_hour,"table_effective":fares.FARE_TABLE_EFFECTIVE.isoformat(),"sources":fares.sources(),
@@ -122,7 +125,8 @@ class CommuteService:
         if evaluation:
             metrics={metric["route_id"]:metric for metric in evaluation["routes"]}
             route_fares={fare["route_id"]:fare for fare in evaluation.get("fares",{}).get("routes",[])}
-            routes=[{**route,**metrics.get(route["id"],{}),"fare":route_fares.get(route["id"])} for route in routes]
+            feasible=set(evaluation.get("feasible_route_ids",metrics))
+            routes=[{**route,**metrics.get(route["id"],{}),"fare":route_fares.get(route["id"]),"available":route.get("available",True) and route["id"] in feasible} for route in routes]
         routes=[{**route,"selected":route["id"]==journey["selected_route_id"],"walking_minutes":round(sum(segment["mean_minutes"] for segment in route["segments"] if segment["kind"]=="walk"),1),"segments":[{**segment,"path":segment_path(segment["id"],segment["origin"],segment["destination"]),"affected":state["fault_active"] and bool(segment.get("affected_entities")),"type":segment["kind"],"instruction":segment.get("instructions", ""),"expected_minutes":segment["mean_minutes"]} for segment in route["segments"]]} for route in routes]
         contingency=None
         if recommendation:

@@ -8,7 +8,7 @@ Problem statement 2: multi-modal, door-to-door journey planning that stays usefu
 
 How the build serves her:
 
-- **Silence by default.** The policy recommends a change only when her current route's ETA misses the target and another route arrives at least 10 minutes sooner. In the demo the fault makes her about 19 minutes late and the alternative about 28 minutes sooner, well above a 15 minute disruption.
+- **Silence by default.** The policy recommends a change only when her current route's ETA misses the target and another route arrives at least 10 minutes sooner. In the demo the fault makes her about 15 minutes late and the alternative about 20 minutes sooner, well above a 15 minute disruption.
 - **One line.** The recommendation headline is the route to take ("Switch at Bugis to Downtown Line"), followed by one sentence: minutes saved, new arrival time, and the time by which she must act.
 - **One notification.** Re-evaluating the same disruption never produces a second alert for the same reroute.
 - **Works underground.** The latest recommendation and step-by-step contingency are stored on the device and expire on the device clock.
@@ -33,6 +33,7 @@ Architecture: a FastAPI modular monolith (SQLite, seeded NumPy estimator) and a 
 - **Plain ETA instead of probability.** An earlier version reported the chance of arriving on time. It was removed: a commuter acts on a time. Each route now shows its ETA, a slow-day ETA, and minutes early or late against the target. The seeded estimator remains only as the way those two times are derived from segment durations.
 - **Price against time.** A literal fare divided by ETA rewards slow routes, so it is not used. The app shows fare and minutes side by side, the extra cost per minute saved against the cheapest route, and one best-value route that minimises `fare + value of time x ETA minutes / 60`, chosen only among routes whose ETA meets the target when any do. A cheap route is never promoted over arriving on time.
 - **Tap-in time is fixed by departure.** Discounts depend on when Rachel passes the fare gate, which is her departure plus a 6 minute access walk. The app therefore advises before she leaves ("leave by 7:38 to save $0.50") and never changes the fare mid-journey.
+- **Only what is still ahead.** Once Rachel has departed, each ETA covers only the travel remaining, so it holds steady as the clock advances. The fault delays a route only if she would reach the affected stretch before it clears. Options whose switching point has passed (the bus after 7:48 AM) are shown as no longer reachable and drop out of fares and decisions.
 - **Same code path for demo and evaluation.** Every demo control goes through the same ingest, estimation and policy code as an explicit evaluation.
 
 ## Evidence for quantitative claims
@@ -47,7 +48,7 @@ Architecture: a FastAPI modular monolith (SQLite, seeded NumPy estimator) and a 
 
 Numbers that are **assumptions or synthetic**, and labelled as such in the UI or code:
 
-- Segment durations, spreads, route distances, station coordinates and the 26 to 34 minute fault duration are synthetic demo data.
+- Segment durations, spreads, route distances, station coordinates and the 46 to 54 minute fault duration are synthetic demo data.
 - The value of time, S$12 per hour, is an adjustable setting (`COMMUTESURE_VALUE_OF_TIME_PER_HOUR`), not a measured figure.
 - The 10 minute reroute threshold, 5 minute hysteresis and 2 minute minimum action window are product choices.
 - One fare table is applied to rail and basic bus. The published LTA table is the bus table; PTC states the distance fare structure is shared.
@@ -70,9 +71,9 @@ The base map is OpenStreetMap standard tiles rendered with Leaflet. "(c) OpenStr
 ## Limitations
 
 - One synthetic corridor with three fixed routes; no live routing, arrivals, alerts or crowding.
-- Each evaluation estimates the whole route from the current clock rather than only the remaining segments.
-- In the fixture, the Bugis transfer route rides the East-West Line but is not tagged as affected, so only the direct East-West route is drawn as disrupted.
-- Monitoring is driven by evaluations and demo controls; there is no background worker or remote push.
+- Progress along a route is inferred from the time since departure and typical segment durations, not from a position fix.
+- The fault is modelled as services held at the affected stretch (Bugis to Raffles Place) until it clears; partial or degraded service is not modelled.
+- Monitoring is driven by evaluations and demo controls. With a manually advanced demo clock a background worker would have nothing to observe, so none is included, and there is no remote push.
 - Single user, localhost only: no authentication, and the device cache is not encrypted.
 - Adult card fares only; no concession, cash or pass fares.
 

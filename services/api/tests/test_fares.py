@@ -74,9 +74,9 @@ def test_snapshot_draws_every_segment_and_marks_only_disrupted_ones(tmp_path:Pat
         segments=[segment for route in state["routes"] for segment in route["segments"]]
         assert all(len(segment["path"])>=2 and all(1.2<lat<1.5 and 103.6<lon<104.1 for lat,lon in segment["path"]) for segment in segments)
         assert not any(segment["affected"] for segment in segments)
-        assert len(next(s for s in segments if s["id"]=="ride-ewl")["path"])==13
+        assert len(next(s for s in segments if s["id"]=="ride-ewl-bugis")["path"])==11
         faulted=api.post("/v1/demo/scenarios/rachel/fault").json()["data"]
-        assert {s["id"] for route in faulted["routes"] for s in route["segments"] if s["affected"]}=={"wait-ewl","ride-ewl"}
+        assert {s["id"] for route in faulted["routes"] for s in route["segments"] if s["affected"]}=={"ride-ewl-city"}
 
 def test_snapshot_exposes_fares_tip_and_sources(tmp_path:Path):
     settings=Settings(_env_file=None,database_path=tmp_path/"fares.db",demo_mode=True,simulation_samples=600,rate_limit_per_minute=1000)

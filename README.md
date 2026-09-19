@@ -20,12 +20,12 @@ On a normal morning, the app stays quiet and confirms:
 
 When an East-West Line signalling fault occurs, CommuteSure recalculates her options:
 
-- Stay on the East-West Line: arrive **8:53 AM**, about 19 minutes late against her 8:35 AM target.
-- Switch at Bugis to the Downtown Line: arrive **8:26 AM**, about 9 minutes early.
+- Stay on the East-West Line: arrive **8:50 AM**, about 15 minutes late against her 8:35 AM target.
+- Switch at Bugis to the Downtown Line: arrive **8:30 AM**, about 5 minutes early.
 
 It sends a single actionable notification:
 
-> Switch at Bugis to the Downtown Line. You arrive about 28 min sooner at 08:26, on time. Act before 08:06.
+> Switch at Bugis to the Downtown Line. You arrive about 20 min sooner at 08:30, on time. Act before 08:06.
 
 ## Why it is different
 
@@ -162,8 +162,8 @@ This prevents notification spam and unstable recommendations that flip back and 
 1. **The evening before:** Rachel sees that her normal departure time is 7:40 AM.
 2. **Normal morning:** the app monitors silently because no action is required.
 3. **Disruption replay:** an East-West Line signalling fault is injected into the demo.
-4. **ETA update:** her current route's ETA slips to about 8:53 AM, roughly 19 minutes past her 8:35 AM target.
-5. **Decision:** switching at Bugis arrives about 28 minutes sooner, clearing the 10 minute threshold.
+4. **ETA update:** her current route's ETA slips to about 8:50 AM, roughly 15 minutes past her 8:35 AM target.
+5. **Decision:** switching at Bugis arrives about 20 minutes sooner, clearing the 10 minute threshold.
 6. **Action:** Rachel receives one notification with the exact interchange instruction.
 7. **Underground continuity:** the contingency card remains available without a connection.
 
