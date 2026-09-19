@@ -6,6 +6,7 @@ import { Header } from './components/Header'
 import { Inbox } from './components/Inbox'
 import { OfflineCard } from './components/OfflineCard'
 import { RecommendationCard } from './components/RecommendationCard'
+import { RouteMap } from './components/RouteMap'
 import { RoutesCard } from './components/RoutesCard'
 import { SetupCard } from './components/SetupCard'
 import { Timeline } from './components/Timeline'
@@ -29,7 +30,8 @@ export function App() {
       <SetupCard snapshot={journey.snapshot} disabled={disabled} onSaved={() => journey.refresh()} />
       <div className="dashboard-grid"><div className="primary-column">
         <RecommendationCard snapshot={journey.snapshot} state={planState} cached={!journey.online} disabled={disabled} onEvaluate={() => void journey.journey('evaluate')} />
-        <RoutesCard routes={journey.snapshot.routes} recommendedRouteId={journey.snapshot.recommendation?.routeId ?? null} disabled={disabled} onAccept={(id) => void journey.accept(id)} />
+        <RoutesCard routes={journey.snapshot.routes} fares={journey.snapshot.fares} recommendedRouteId={journey.snapshot.recommendation?.routeId ?? null} disabled={disabled} onAccept={(id) => void journey.accept(id)} />
+        <RouteMap routes={journey.snapshot.routes} recommendedRouteId={journey.snapshot.recommendation?.routeId ?? null} origin={journey.snapshot.origin} destination={journey.snapshot.destination} />
         <Timeline route={selectedRoute} />
       </div><aside className="side-column">
         <OfflineCard plan={journey.cachedPlan} state={planState} now={effectiveNow} />

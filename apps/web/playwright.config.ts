@@ -13,7 +13,7 @@ export default defineConfig({
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: [
-    { command: 'uv run --project ../../services/api uvicorn commutesure.app:app --app-dir ../../services/api --host 127.0.0.1 --port 8000', url: 'http://127.0.0.1:8000/health', reuseExistingServer: true, timeout: 120_000 },
+    { command: 'uv run --project ../../services/api uvicorn commutesure.app:app --app-dir ../../services/api --host 127.0.0.1 --port 8000', env: { COMMUTESURE_DEMO_MODE: 'true' }, url: 'http://127.0.0.1:8000/health', reuseExistingServer: true, timeout: 120_000 },
     { command: 'npm run build && npm run preview', url: 'http://127.0.0.1:4173', reuseExistingServer: true, timeout: 120_000 },
   ],
 })

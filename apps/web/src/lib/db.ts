@@ -17,7 +17,7 @@ function openDb(): Promise<IDBDatabase> {
 
 async function transaction<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const db = await openDb()
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const request = work(db.transaction(STORE, mode).objectStore(STORE))
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Offline storage failed'))

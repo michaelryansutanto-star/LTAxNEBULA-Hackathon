@@ -23,7 +23,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 export async function loadScenario(): Promise<string> {
   const raw = await request('/v1/demo/scenarios/rachel')
   const id = scenarioJourneyId(raw)
-  if (!id) throw new ApiError('Rachel’s demo journey is unavailable.')
+  if (!id) throw new ApiError("Rachel's demo journey is unavailable.")
   return id
 }
 

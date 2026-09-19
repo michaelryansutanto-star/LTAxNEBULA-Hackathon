@@ -6,17 +6,48 @@ export interface Segment {
   from: string
   to: string
   instruction: string
+  path: [number, number][]
+  affected: boolean
   durationMinutes?: number
   completed?: boolean
 }
 
+export interface FareView {
+  amount: number
+  baseAmount: number
+  discount: number
+  scheme: 'pre_peak' | 'free_off_peak' | null
+  distanceKm: number
+  etaMinutes: number
+  extraCostPerMinuteSaved: number | null
+  cheapest: boolean
+  fastest: boolean
+  bestValue: boolean
+}
+
+export interface FareTipView {
+  leaveBy: string
+  tapInBefore: string
+  saving: number
+  minutesEarlier: number
+}
+
+export interface FareContextView {
+  tip: FareTipView | null
+  railTapIn: string | null
+  valueOfTimePerHour: number
+  tableEffective: string
+  sources: { label: string; url: string }[]
+}
+
 export interface RouteView {
+  fare: FareView | null
   id: string
   name: string
   description?: string
-  probability: number | null
-  p50: string | null
-  p90: string | null
+  eta: string | null
+  conservativeEta: string | null
+  lateMinutes: number | null
   walkingMinutes: number
   transfers: number
   selected: boolean
@@ -30,7 +61,7 @@ export interface RecommendationView {
   action: string
   kind: 'stay' | 'reroute' | 'monitor' | 'uncertain'
   reason: string
-  improvement: number | null
+  minutesSaved: number | null
   routeId: string | null
   generatedAt: string
   expiresAt: string
@@ -67,6 +98,7 @@ export interface SnapshotView {
   freshnessReason: string
   selectedRouteId: string | null
   routes: RouteView[]
+  fares: FareContextView | null
   recommendation: RecommendationView | null
   notifications: NotificationView[]
 }

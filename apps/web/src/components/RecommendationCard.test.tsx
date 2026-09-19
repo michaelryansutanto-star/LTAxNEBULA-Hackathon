@@ -9,11 +9,12 @@ describe('recommendation card', () => {
     expect(screen.getByText('Event deadline')).toBeVisible()
     expect(screen.getByText('Target with 10 min buffer')).toBeVisible()
     expect(screen.getByRole('button', { name: /re-evaluate/i })).toBeEnabled()
+    expect(screen.getByTestId('recommended-eta')).toHaveTextContent(/8:20.*15 min early against target/i)
   })
 
-  it('suppresses current probability and advice when expired', () => {
+  it('suppresses the current ETA and advice when expired', () => {
     render(<RecommendationCard snapshot={snapshot()} state="expired" cached disabled onEvaluate={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /reconnect for current advice/i })).toBeVisible()
-    expect(screen.queryByText('86%')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('recommended-eta')).not.toBeInTheDocument()
   })
 })

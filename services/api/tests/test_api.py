@@ -16,6 +16,7 @@ def test_health_and_full_demo_flow(tmp_path):
         assert baseline["recommendation"]["action"] in {"stay","monitor"}
         disrupted=api.post("/v1/demo/scenarios/rachel/fault").json()["data"]
         assert disrupted["recommendation"]["action"]=="reroute" and disrupted["recommendation"]["route_id"]!="current-ewl"
+        assert disrupted["recommendation"]["headline"]=="Switch at Bugis to Downtown Line (synthetic)" and "min sooner" in disrupted["recommendation"]["explanation"] and "%" not in disrupted["recommendation"]["explanation"]
         assert len(api.get("/v1/notifications").json()["data"])==1
         api.post("/v1/demo/scenarios/rachel/fault")
         assert len(api.get("/v1/notifications").json()["data"])==1
@@ -88,6 +89,6 @@ def test_patch_reuses_weekday_and_deadline_validation(tmp_path):
         assert bad_days.status_code==422 and bad_deadline.status_code==422
 
 def test_settings_are_safe_by_default_and_bounded():
-    assert Settings().demo_mode is False
+    assert Settings(_env_file=None).demo_mode is False
     for values in ({"simulation_samples":99},{"simulation_samples":100_001},{"rate_limit_per_minute":0},{"simulation_seed":-1}):
         with pytest.raises(ValidationError): Settings(**values)

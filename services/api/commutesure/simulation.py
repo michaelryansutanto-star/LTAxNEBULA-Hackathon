@@ -26,4 +26,4 @@ class Simulator:
             total += remaining
         p50=float(np.quantile(total,.5)); p90=float(np.quantile(total,.9)); available=(deadline-now).total_seconds()/60
         quality="good" if not quality_reasons else ("degraded" if len(quality_reasons)<2 else "poor")
-        return EvaluationResult(route.id,round(float(np.mean(total<=available)),4),now+timedelta(minutes=p50),now+timedelta(minutes=p90),self.config.samples,self.config.model_version,self.config.seed,input_snapshot_id,quality,quality_reasons)
+        return EvaluationResult(route.id,now+timedelta(minutes=p50),now+timedelta(minutes=p90),round(p50-available,1),self.config.samples,self.config.model_version,self.config.seed,input_snapshot_id,quality,quality_reasons)

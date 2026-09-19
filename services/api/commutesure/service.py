@@ -6,7 +6,8 @@ from uuid import uuid4
 from .alerts import AlertNormalizer
 from .clock import DemoClock
 from .domain import Action,CommutePlan,Journey,Recommendation,Route
-from .fixtures import INITIAL_TIME,fault_payload,rachel_routes
+from . import fares
+from .fixtures import INITIAL_TIME,RAIL_ACCESS_MINUTES,fault_payload,rachel_routes,segment_path
 from .persistence import Repository
 from .policy import PolicyConfig,RecommendationPolicy
 from .simulation import SimulationConfig,Simulator
@@ -21,8 +22,8 @@ def iso(value:Any)->Any:
 def dump(value:Any)->dict[str,Any]: return iso(asdict(value))
 
 class CommuteService:
-    def __init__(self,repo:Repository,samples:int,seed:int):
-        self.repo=repo; self.simulator=Simulator(SimulationConfig(samples,seed)); self.policy=RecommendationPolicy(PolicyConfig()); self.normalizer=AlertNormalizer()
+    def __init__(self,repo:Repository,samples:int,seed:int,value_of_time_per_hour:float=12.0):
+        self.repo=repo; self.value_of_time_per_hour=value_of_time_per_hour; self.simulator=Simulator(SimulationConfig(samples,seed)); self.policy=RecommendationPolicy(PolicyConfig()); self.normalizer=AlertNormalizer()
         if not self.repo.get("commute_plans",{"id":"rachel"}): self._save_plan(CommutePlan.rachel())
         if not self.repo.get("scenario_state",{"scenario_id":"rachel"}): self.reset()
     def _save_plan(self,plan:CommutePlan): self.repo.put("commute_plans",{"id":plan.id},dump(plan))
@@ -94,15 +95,25 @@ class CommuteService:
         elapsed=max(0,(now-datetime(2026,9,21,7,48,tzinfo=now.tzinfo)).total_seconds()/60) if incident else 0
         current_result=self.simulator.evaluate(current,now,target,f"rachel-{state['revision']}-{state['sequence']}",incident_total_minutes=incident,incident_elapsed_minutes=elapsed,quality_reasons=qualities)
         alternatives=[self.simulator.evaluate(route,now,target,f"rachel-{state['revision']}-{state['sequence']}",quality_reasons=qualities) for route in models if route.id!=selected]
-        rec=self.policy.decide(current_result,alternatives,now,current.decision_deadline,fresh=not state["provider_stale"],feasible_route_ids={r.id for r in models if r.available},selected_route_id=selected if selected!="current-ewl" else None)
+        rec=self.policy.decide(current_result,alternatives,now,current.decision_deadline,fresh=not state["provider_stale"],feasible_route_ids={r.id for r in models if r.available},selected_route_id=selected if selected!="current-ewl" else None,route_names={r.id:r.name for r in models})
         sequence=state["sequence"]+1; metrics=[dump(current_result),*[dump(x) for x in alternatives]]
-        evaluation={"id":f"evaluation-{sequence}","sequence":sequence,"target_arrival":target.isoformat(),"routes":metrics,"model_label":"Simulated demo estimate; not calibrated against real commuter outcomes"}
+        evaluation={"id":f"evaluation-{sequence}","sequence":sequence,"target_arrival":target.isoformat(),"routes":metrics,"fares":self._fares(journey,now,models,[current_result,*alternatives]),"model_label":"Estimated arrival times from synthetic segment durations; not calibrated against real commuter outcomes"}
         self.repo.add_evaluation(jid,sequence,evaluation); self.repo.put("recommendations",{"journey_id":jid},dump(rec),sequence=sequence)
         self._save_state({**state,"sequence":sequence})
         if rec.action is Action.REROUTE:
             notification={"id":f"notify-{jid}-{rec.route_id}","journey_id":jid,"title":"Useful route change available","body":rec.explanation,"action":rec.action.value,"route_id":rec.route_id,"state":"delivered","created_at":now.isoformat()}
             self.repo.notify_once(jid,f"{jid}:reroute:{rec.route_id}",notification)
         return self.snapshot(jid)
+    def _fares(self,journey:dict[str,Any],now:datetime,models:tuple[Route,...],results:list[Any])->dict[str,Any]:
+        # The fare gates are passed once, shortly after leaving home, so the tap-in time is fixed by the departure.
+        departed=journey.get("started_at") is not None; departure=datetime.fromisoformat(journey["started_at"]) if departed else now
+        tap_in=departure+timedelta(minutes=RAIL_ACCESS_MINUTES); by_route={result.route_id:result for result in results}
+        available=[route for route in models if route.available and route.id in by_route]
+        eta={route.id:max(0.0,(by_route[route.id].eta-now).total_seconds()/60) for route in available}
+        on_time=[route.id for route in available if by_route[route.id].late_minutes<=0]
+        return {"routes":fares.compare([fares.quote(route,tap_in) for route in available],eta,on_time,self.value_of_time_per_hour),"rail_tap_in":tap_in.isoformat(),"tip":fares.pre_peak_tip(departure,RAIL_ACCESS_MINUTES,departed),
+            "value_of_time_per_hour":self.value_of_time_per_hour,"table_effective":fares.FARE_TABLE_EFFECTIVE.isoformat(),"sources":fares.sources(),
+            "label":"Adult card fares from the published distance fare table, applied to synthetic route distances"}
     def snapshot(self,jid:str,evaluate_if_missing=False):
         journey=self._journey(jid); state=self._state(); recommendation=self.repo.get("recommendations",{"journey_id":jid})
         if recommendation is None and evaluate_if_missing:return self.evaluate(jid)
@@ -110,13 +121,14 @@ class CommuteService:
         routes=self.routes(jid)
         if evaluation:
             metrics={metric["route_id"]:metric for metric in evaluation["routes"]}
-            routes=[{**route,**metrics.get(route["id"],{})} for route in routes]
-        routes=[{**route,"selected":route["id"]==journey["selected_route_id"],"walking_minutes":round(sum(segment["mean_minutes"] for segment in route["segments"] if segment["kind"]=="walk"),1),"segments":[{**segment,"type":segment["kind"],"instruction":segment.get("instructions", ""),"expected_minutes":segment["mean_minutes"]} for segment in route["segments"]]} for route in routes]
+            route_fares={fare["route_id"]:fare for fare in evaluation.get("fares",{}).get("routes",[])}
+            routes=[{**route,**metrics.get(route["id"],{}),"fare":route_fares.get(route["id"])} for route in routes]
+        routes=[{**route,"selected":route["id"]==journey["selected_route_id"],"walking_minutes":round(sum(segment["mean_minutes"] for segment in route["segments"] if segment["kind"]=="walk"),1),"segments":[{**segment,"path":segment_path(segment["id"],segment["origin"],segment["destination"]),"affected":state["fault_active"] and bool(segment.get("affected_entities")),"type":segment["kind"],"instruction":segment.get("instructions", ""),"expected_minutes":segment["mean_minutes"]} for segment in route["segments"]]} for route in routes]
         contingency=None
         if recommendation:
             route=self.repo.get("routes",{"id":recommendation["route_id"],"journey_id":jid})
             contingency={"journey_id":jid,"generated_at":recommendation["generated_at"],"expires_at":recommendation["expires_at"],"route_version":route["version"] if route else "unknown","trigger_condition":"If the current recommendation remains actionable before the decision deadline","decision_deadline":recommendation["decision_deadline"],"primary_action":recommendation["explanation"],"instructions":route["segments"] if route else [],"freshness":recommendation["freshness"]}
         plan=self.plan(journey["plan_id"]); local_day=datetime.fromisoformat(state["clock"]).date(); event_deadline=datetime.combine(local_day,time.fromisoformat(plan["deadline"]),datetime.fromisoformat(state["clock"]).tzinfo).isoformat()
-        if recommendation: recommendation={**recommendation,"action_code":recommendation["action"],"reason":recommendation["explanation"],"route_version":next((route["version"] for route in routes if route["id"]==recommendation["route_id"]),"unknown")}
-        return {"scenario_id":journey.get("scenario_id","local"),"demo_label":"Synthetic deterministic data — not live travel advice","clock":state["clock"],"paused":state["paused"],"fault_active":state["fault_active"],"provider_stale":state["provider_stale"],"journey":journey,"plan":plan,"origin":plan["origin"],"destination":plan["destination"],"event_deadline":event_deadline,"buffer_minutes":plan["buffer_minutes"],"routes":routes,"evaluation":evaluation,"sequence":evaluation["sequence"] if evaluation else 0,"target_arrival":evaluation["target_arrival"] if evaluation else None,"input_snapshot_id":evaluation["routes"][0]["input_snapshot_id"] if evaluation else "","seed":self.simulator.config.seed,"model_version":self.simulator.config.model_version,"sample_count":self.simulator.config.samples,"freshness":"stale" if state["provider_stale"] else "fresh","recommendation":recommendation,"contingency":contingency,"notifications":self.repo.list_data("notifications",{"journey_id":jid})}
+        if recommendation: recommendation={**recommendation,"headline":next((route["name"] for route in routes if route["id"]==recommendation["route_id"]),"Keep monitoring") if recommendation["action"] in ("stay","reroute") else "Keep monitoring","action_code":recommendation["action"],"reason":recommendation["explanation"],"route_version":next((route["version"] for route in routes if route["id"]==recommendation["route_id"]),"unknown")}
+        return {"scenario_id":journey.get("scenario_id","local"),"demo_label":"Synthetic deterministic data - not live travel advice","clock":state["clock"],"paused":state["paused"],"fault_active":state["fault_active"],"provider_stale":state["provider_stale"],"journey":journey,"plan":plan,"origin":plan["origin"],"destination":plan["destination"],"event_deadline":event_deadline,"buffer_minutes":plan["buffer_minutes"],"routes":routes,"evaluation":evaluation,"sequence":evaluation["sequence"] if evaluation else 0,"target_arrival":evaluation["target_arrival"] if evaluation else None,"input_snapshot_id":evaluation["routes"][0]["input_snapshot_id"] if evaluation else "","seed":self.simulator.config.seed,"model_version":self.simulator.config.model_version,"sample_count":self.simulator.config.samples,"freshness":"stale" if state["provider_stale"] else "fresh","recommendation":recommendation,"contingency":contingency,"notifications":self.repo.list_data("notifications",{"journey_id":jid})}
     def notifications(self): return self.repo.list_data("notifications")

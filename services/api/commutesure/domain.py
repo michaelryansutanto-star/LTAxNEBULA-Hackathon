@@ -25,9 +25,10 @@ class CommutePlan:
 
 @dataclass(frozen=True)
 class Segment:
-    id:str; kind:SegmentKind; origin:str; destination:str; mean_minutes:float; stddev_minutes:float; affected_entities:tuple[str,...]=(); instructions:str=""
+    id:str; kind:SegmentKind; origin:str; destination:str; mean_minutes:float; stddev_minutes:float; affected_entities:tuple[str,...]=(); instructions:str=""; mode:str|None=None; distance_km:float=0.0
     def __post_init__(self):
         if self.mean_minutes<0 or self.stddev_minutes<0: raise ValueError("segment durations must be nonnegative")
+        if self.distance_km<0: raise ValueError("segment distance must be nonnegative")
 
 @dataclass(frozen=True)
 class Route:
@@ -42,11 +43,12 @@ class Route:
 
 @dataclass(frozen=True)
 class EvaluationResult:
-    route_id:str; on_time_probability:float; p50_arrival:datetime; p90_arrival:datetime; sample_count:int; model_version:str; seed:int; input_snapshot_id:str; quality_label:str; quality_reasons:tuple[str,...]
+    # eta is the typical arrival; conservative_eta is a slow-day arrival; late_minutes is eta against the target (negative means early).
+    route_id:str; eta:datetime; conservative_eta:datetime; late_minutes:float; sample_count:int; model_version:str; seed:int; input_snapshot_id:str; quality_label:str; quality_reasons:tuple[str,...]
 
 @dataclass(frozen=True)
 class Recommendation:
-    action:Action; route_id:str; reason_code:str; explanation:str; improvement:float; generated_at:datetime; expires_at:datetime; decision_deadline:datetime|None; freshness:str="fresh"
+    action:Action; route_id:str; reason_code:str; explanation:str; minutes_saved:float; generated_at:datetime; expires_at:datetime; decision_deadline:datetime|None; freshness:str="fresh"
 
 @dataclass(frozen=True)
 class Journey:

@@ -1,9 +1,9 @@
-import type { NotificationView, RecommendationView, RouteView, Segment, SnapshotView } from '../types'
+import type { FareContextView, FareView, NotificationView, RecommendationView, RouteView, Segment, SnapshotView } from '../types'
 
 type Json = Record<string, unknown>
 
 const obj = (value: unknown): Json => value && typeof value === 'object' ? value as Json : {}
-const value = (source: Json, ...keys: string[]) => keys.map((key) => source[key]).find((item) => item !== undefined)
+const value = (source: Json, ...keys: string[]) => keys.map((key) => source[key]).find((item) => item !== undefined && item !== null)
 const str = (source: Json, fallback: string, ...keys: string[]) => String(value(source, ...keys) ?? fallback)
 const num = (source: Json, fallback: number, ...keys: string[]) => {
   const parsed = Number(value(source, ...keys))
@@ -34,27 +34,75 @@ function segment(raw: unknown, index: number): Segment {
     from: start,
     to: end,
     instruction: str(item, `${start} to ${end}`, 'instruction', 'instructions', 'label', 'name'),
+    path: array(item, 'path').map((point) => (Array.isArray(point) ? point.slice(0, 2).map(Number) : []) as [number, number]).filter((point) => point.length === 2 && point.every(Number.isFinite)),
+    affected: bool(item, false, 'affected'),
     durationMinutes: num(item, 0, 'durationMinutes', 'duration_minutes', 'expected_minutes', 'base_minutes'),
     completed: bool(item, false, 'completed'),
+  }
+}
+
+function fare(raw: unknown): FareView | null {
+  const item = obj(raw)
+  const amount = Number(value(item, 'amount'))
+  if (!Number.isFinite(amount)) return null
+  const scheme = value(item, 'scheme')
+  const perMinute = Number(value(item, 'extraCostPerMinuteSaved', 'extra_cost_per_minute_saved'))
+  return {
+    amount,
+    baseAmount: num(item, amount, 'baseAmount', 'base_amount'),
+    discount: num(item, 0, 'discount'),
+    scheme: scheme === 'pre_peak' || scheme === 'free_off_peak' ? scheme : null,
+    distanceKm: num(item, 0, 'distanceKm', 'distance_km'),
+    etaMinutes: num(item, 0, 'etaMinutes', 'eta_minutes'),
+    extraCostPerMinuteSaved: Number.isFinite(perMinute) && perMinute > 0 ? perMinute : null,
+    cheapest: bool(item, false, 'cheapest'),
+    fastest: bool(item, false, 'fastest'),
+    bestValue: bool(item, false, 'bestValue', 'best_value'),
+  }
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  fare_table: 'LTA fare table',
+  distance_fares: 'PTC distance fares',
+  pre_peak: 'PTC morning pre-peak fares',
+  free_off_peak: 'LTA free morning off-peak rides',
+  public_holidays: 'MOM public holidays',
+}
+
+function fareContext(raw: unknown): FareContextView | null {
+  if (!raw || typeof raw !== 'object') return null
+  const item = obj(raw)
+  const tipRaw = value(item, 'tip')
+  const tip = obj(tipRaw)
+  return {
+    tip: tipRaw ? {
+      leaveBy: str(tip, '', 'leaveBy', 'leave_by'),
+      tapInBefore: str(tip, '', 'tapInBefore', 'tap_in_before'),
+      saving: num(tip, 0, 'saving'),
+      minutesEarlier: num(tip, 0, 'minutesEarlier', 'minutes_earlier'),
+    } : null,
+    railTapIn: value(item, 'railTapIn', 'rail_tap_in') as string | undefined ?? null,
+    valueOfTimePerHour: num(item, 0, 'valueOfTimePerHour', 'value_of_time_per_hour'),
+    tableEffective: str(item, '', 'tableEffective', 'table_effective'),
+    sources: Object.entries(obj(item.sources)).filter(([, url]) => typeof url === 'string' && url.startsWith('https://')).map(([key, url]) => ({ label: SOURCE_LABELS[key] ?? key, url: String(url) })),
   }
 }
 
 function route(raw: unknown, index: number): RouteView {
   const item = obj(raw)
   const metrics = obj(item.metrics ?? item.evaluation)
-  const probabilityValue = value(item, 'probability', 'onTimeProbability', 'on_time_probability')
-    ?? value(metrics, 'probability', 'onTimeProbability', 'on_time_probability')
-  const probability = Number(probabilityValue)
+  const lateRaw = value(item, 'lateMinutes', 'late_minutes') ?? value(metrics, 'lateMinutes', 'late_minutes')
+  const lateMinutes = lateRaw === undefined ? NaN : Number(lateRaw)
   const routeId = str(item, `route-${index}`, 'id', 'routeId', 'route_id')
   return {
     id: routeId,
+    fare: fare(item.fare),
     name: str(item, `Route ${index + 1}`, 'name', 'label'),
     description: str(item, '', 'description', 'summary'),
-    probability: Number.isFinite(probability) ? probability : null,
-    p50: value(item, 'p50', 'p50Arrival', 'p50_arrival') as string | undefined
-      ?? value(metrics, 'p50', 'p50Arrival', 'p50_arrival') as string | undefined ?? null,
-    p90: value(item, 'p90', 'p90Arrival', 'p90_arrival') as string | undefined
-      ?? value(metrics, 'p90', 'p90Arrival', 'p90_arrival') as string | undefined ?? null,
+    eta: value(item, 'eta') as string | undefined ?? value(metrics, 'eta') as string | undefined ?? null,
+    conservativeEta: value(item, 'conservativeEta', 'conservative_eta') as string | undefined
+      ?? value(metrics, 'conservativeEta', 'conservative_eta') as string | undefined ?? null,
+    lateMinutes: Number.isFinite(lateMinutes) ? lateMinutes : null,
     walkingMinutes: num(item, num(metrics, 0, 'walkingMinutes', 'walking_minutes'), 'walkingMinutes', 'walking_minutes'),
     transfers: num(item, num(metrics, 0, 'transfers'), 'transfers', 'transfer_count'),
     selected: bool(item, false, 'selected', 'isSelected', 'is_selected'),
@@ -71,16 +119,17 @@ function recommendation(raw: unknown, contingencyRaw: unknown, clock: string): R
   const contingency = obj(item.contingency ?? contingencyRaw)
   const actionCode = str(item, '', 'action', 'kind', 'actionCode', 'action_code')
   if (!actionCode) return null
-  const action = str(contingency, str(item, actionCode, 'primaryAction', 'primary_action', 'explanation'), 'primaryAction', 'primary_action', 'action')
+  const action = str(item, str(contingency, str(item, actionCode, 'primaryAction', 'primary_action', 'explanation'), 'primaryAction', 'primary_action', 'action'), 'headline')
   const rawKind = actionCode.toLowerCase()
   const kind = rawKind.includes('route') || rawKind.includes('switch') ? 'reroute'
     : rawKind.includes('stay') ? 'stay' : rawKind.includes('uncertain') ? 'uncertain' : 'monitor'
-  const improvementRaw = Number(value(item, 'improvement', 'probabilityImprovement', 'probability_improvement'))
+  const savedRaw = value(item, 'minutesSaved', 'minutes_saved')
+  const minutesSaved = savedRaw === undefined ? NaN : Number(savedRaw)
   return {
     action,
     kind,
     reason: str(item, 'Keep monitoring this journey as conditions change.', 'reason', 'explanation'),
-    improvement: Number.isFinite(improvementRaw) ? improvementRaw : null,
+    minutesSaved: Number.isFinite(minutesSaved) ? minutesSaved : null,
     routeId: value(item, 'routeId', 'route_id', 'recommendedRouteId', 'recommended_route_id') as string ?? null,
     generatedAt: timestamp(item, clock, 'generatedAt', 'generated_at'),
     expiresAt: timestamp(item, clock, 'expiresAt', 'expires_at'),
@@ -97,7 +146,7 @@ function notification(raw: unknown, index: number): NotificationView {
     id: str(item, `notification-${index}`, 'id'),
     title: str(item, 'Journey update', 'title'),
     message: str(item, '', 'message', 'body'),
-    status: str(item, 'delivered in app', 'status', 'delivery_status'),
+    status: str(item, 'delivered in app', 'status', 'state', 'delivery_status'),
     createdAt: timestamp(item, '', 'createdAt', 'created_at'),
   }
 }
@@ -134,7 +183,7 @@ export function normalizeSnapshot(raw: unknown): SnapshotView {
     targetArrival: timestamp(evaluation, timestamp(journey, timestamp(source, '', 'targetArrival', 'target_arrival'), 'targetArrival', 'target_arrival'), 'targetArrival', 'target_arrival'),
     bufferMinutes: num(plan, num(journey, num(source, 10, 'bufferMinutes', 'buffer_minutes'), 'bufferMinutes', 'buffer_minutes'), 'bufferMinutes', 'buffer_minutes'),
     sequence: num(evaluation, num(source, 0, 'sequence', 'sequenceNumber', 'sequence_number'), 'sequence'),
-    scenario: str(demo, 'Rachel’s weekday commute', 'label', 'scenario', 'name'),
+    scenario: str(demo, "Rachel's weekday commute", 'label', 'scenario', 'name'),
     seed: Number.isFinite(Number(value(demo, 'seed') ?? value(firstMetrics, 'seed') ?? value(source, 'seed'))) ? Number(value(demo, 'seed') ?? value(firstMetrics, 'seed') ?? value(source, 'seed')) : null,
     modelVersion: str(demo, str(firstMetrics, str(source, 'unknown', 'modelVersion', 'model_version'), 'modelVersion', 'model_version'), 'modelVersion', 'model_version'),
     sampleCount: Number.isFinite(Number(value(demo, 'sampleCount', 'sample_count') ?? value(firstMetrics, 'sampleCount', 'sample_count') ?? value(source, 'sampleCount', 'sample_count'))) ? Number(value(demo, 'sampleCount', 'sample_count') ?? value(firstMetrics, 'sampleCount', 'sample_count') ?? value(source, 'sampleCount', 'sample_count')) : null,
@@ -143,6 +192,7 @@ export function normalizeSnapshot(raw: unknown): SnapshotView {
     freshnessReason: str(obj(freshnessRaw), str(source, '', 'freshnessReason', 'freshness_reason'), 'reason', 'note'),
     selectedRouteId: selected || normalizedRoutes.find((item) => item.selected)?.id || null,
     routes: normalizedRoutes,
+    fares: fareContext(evaluation.fares),
     recommendation: recommendation(source.recommendation, source.contingency, clock),
     notifications: array(source, 'notifications').map(notification),
   }

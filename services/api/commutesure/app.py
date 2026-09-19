@@ -51,7 +51,7 @@ class JourneyCreate(BaseModel):
 
 def envelope(data:Any): return {"success":True,"data":data,"error":None}
 def create_app(settings:Settings|None=None)->FastAPI:
-    config=settings or Settings(); repo=Repository(config.database_path); service=CommuteService(repo,config.simulation_samples,config.simulation_seed)
+    config=settings or Settings(); repo=Repository(config.database_path); service=CommuteService(repo,config.simulation_samples,config.simulation_seed,config.value_of_time_per_hour)
     @asynccontextmanager
     async def lifespan(_:FastAPI): yield
     app=FastAPI(title="CommuteSure SG API",version="0.1.0",lifespan=lifespan); app.state.settings=config; app.state.service=service

@@ -1,5 +1,7 @@
 # CommuteSure SG build prompt
 
+> **Update 2026-09-19:** the product owner dropped on-time probability. Decisions and the UI now use a plain ETA, a slow-day ETA and minutes early or late against the target, and the build adds adult card fares with a best-value pick and an OpenStreetMap route map. Where this document mentions probabilities, percentages or Monte Carlo outputs, read it as the original design; the current behaviour is described in the README and IMPLEMENTATION_NOTES.md.
+
 Copy the prompt below into your coding agent's chat while this repository is open. This is an implementation request for a local hackathon MVP.
 
 ---

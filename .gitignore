@@ -9,6 +9,7 @@ htmlcov/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 
 node_modules/
 dist/

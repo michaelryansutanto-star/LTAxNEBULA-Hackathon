@@ -27,17 +27,17 @@ def test_segments_reject_negative_durations_and_route_discontinuity():
 def test_seed_is_reproducible_and_metrics_are_ordered():
     sim=Simulator(SimulationConfig(samples=1000,seed=17)); now=datetime(2026,9,19,7,50,tzinfo=SGT); deadline=now+timedelta(minutes=30)
     first=sim.evaluate(route(),now,deadline,"snapshot"); second=sim.evaluate(route(),now,deadline,"snapshot")
-    assert first==second and 0<=first.on_time_probability<=1 and first.p50_arrival<=first.p90_arrival and first.sample_count==1000
+    assert first==second and now<first.eta<=first.conservative_eta and first.late_minutes==round((first.eta-deadline).total_seconds()/60,1) and first.sample_count==1000
 
-def test_later_deadline_cannot_reduce_probability_and_delay_cannot_increase_it():
+def test_later_deadline_reduces_lateness_and_a_longer_ride_pushes_the_eta_back():
     sim=Simulator(SimulationConfig(samples=2000,seed=21)); now=datetime(2026,9,19,7,50,tzinfo=SGT)
     earlier=sim.evaluate(route(),now,now+timedelta(minutes=27),"s"); later=sim.evaluate(route(),now,now+timedelta(minutes=30),"s"); delayed=sim.evaluate(route(extra=8),now,now+timedelta(minutes=27),"s")
-    assert later.on_time_probability>=earlier.on_time_probability and delayed.on_time_probability<=earlier.on_time_probability
+    assert later.eta==earlier.eta and later.late_minutes==earlier.late_minutes-3 and delayed.eta>earlier.eta and delayed.late_minutes>earlier.late_minutes
 
 def test_shared_incident_delay_is_applied_once_and_conditioned_on_elapsed():
     sim=Simulator(SimulationConfig(samples=500,seed=9)); now=datetime(2026,9,19,7,50,tzinfo=SGT)
     r=Route(id="r",name="r",synthetic=True,segments=(Segment(id="a",kind=SegmentKind.RIDE,origin="A",destination="B",mean_minutes=1,stddev_minutes=0,affected_entities=("EWL",)),Segment(id="b",kind=SegmentKind.RIDE,origin="B",destination="C",mean_minutes=1,stddev_minutes=0,affected_entities=("EWL",))))
-    assert sim.evaluate(r,now,now+timedelta(hours=1),"s",incident_total_minutes=(20,20),incident_elapsed_minutes=8).p50_arrival==now+timedelta(minutes=14)
+    assert sim.evaluate(r,now,now+timedelta(hours=1),"s",incident_total_minutes=(20,20),incident_elapsed_minutes=8).eta==now+timedelta(minutes=14)
 
 def test_remaining_route_does_not_charge_completed_segments():
     assert [s.id for s in route().remaining_after("B").segments]==["wait","ride"]
